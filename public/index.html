@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>20 Questions Multiplayer</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #game { display: none; }
+    .question { margin: 5px 0; }
+    .guess { margin: 5px 0; font-weight: bold; }
+    button { margin: 2px; }
+  </style>
+</head>
+<body>
+  <h1>20 Questions Multiplayer</h1>
+
+  <div id="menu">
+    <input id="roomCode" placeholder="Codice stanza">
+    <input id="playerName" placeholder="Il tuo nome">
+    <input id="secret" placeholder="Segreto (solo Pensatore)">
+    <button id="createBtn">Crea stanza</button>
+    <button id="joinBtn">Entra in stanza</button>
+  </div>
+
+  <div id="game">
+    <h3 id="role"></h3>
+    <div id="players"></div>
+    <hr>
+    <div id="askArea">
+      <input id="questionInput" placeholder="Fai una domanda">
+      <button id="askBtn">Chiedi</button>
+    </div>
+    <div id="guessArea">
+      <input id="guessInput" placeholder="Tenta una risposta">
+      <button id="guessBtn">Indovina</button>
+    </div>
+    <hr>
+    <h4>Domande:</h4>
+    <div id="questions"></div>
+    <h4>Tentativi:</h4>
+    <div id="guesses"></div>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentRoom = null;
+    let isThinker = false;
+
+    const menu = document.getElementById('menu');
+    const game = document.getElementById('game');
+    const role = document.getElementById('role');
+    const playersDiv = document.getElementById('players');
+    const questionsDiv = document.getElementById('questions');
+    const guessesDiv = document.getElementById('guesses');
+
+    document.getElementById('createBtn').onclick = () => {
+      socket.emit('room:create', {
+        code: document.getElementById('roomCode').value,
+        name: document.getElementById('playerName').value,
+        secret: document.getElementById('secret').value
+      });
+    };
+
+    document.getElementById('joinBtn').onclick = () => {
+      socket.emit('room:join', {
+        code: document.getElementById('roomCode').value,
+        name: document.getElementById('playerName').value
+      });
+    };
+
+    socket.on('room:joined', ({ code, thinker }) => {
+      currentRoom = code;
+      isThinker = thinker;
+      menu.style.display = 'none';
+      game.style.display = 'block';
+      role.textContent = thinker ? "Sei il Pensatore" : "Sei un Giocatore";
+      document.getElementById('askArea').style.display = thinker ? "none" : "block";
+      document.getElementById('guessArea').style.display = thinker ? "none" : "block";
+    });
+
+    socket.on('players:update', players => {
+      playersDiv.innerHTML = "<b>Giocatori:</b> " + players.map(p => p.name + (p.thinker ? " (Pensatore)" : "")).join(", ");
+    });
+
+    document.getElementById('askBtn').onclick = () => {
+      const q = document.getElementById('questionInput').value;
+      if (q) {
+        socket.emit('question:ask', { code: currentRoom, text: q });
+        document.getElementById('questionInput').value = "";
+      }
+    };
+
+    socket.on('question:new', q => {
+      const div = document.createElement('div');
+      div.className = "question";
+      div.textContent = q.byName + ": " + q.text;
+      if (isThinker && q.answer === null) {
+        ["Sì","No","Non so"].forEach(ans => {
+          const btn = document.createElement('button');
+          btn.textContent = ans;
+          btn.onclick = () => {
+            socket.emit('question:answer', { code: currentRoom, id: q.id, answer: ans });
+          };
+          div.appendChild(btn);
+        });
+      }
+      questionsDiv.appendChild(div);
+    });
+
+    socket.on('question:update', q => {
+      [...questionsDiv.children].forEach(div => {
+        if (div.textContent.startsWith(q.byName + ": " + q.text)) {
+          div.textContent = q.byName + ": " + q.text + " → " + q.answer;
+        }
+      });
+    });
+
+    document.getElementById('guessBtn').onclick = () => {
+      const g = document.getElementById('guessInput').value;
+      if (g) {
+        socket.emit('guess:try', { code: currentRoom, guess: g });
+        document.getElementById('guessInput').value = "";
+      }
+    };
+
+    socket.on('guess:new', data => {
+      const div = document.createElement('div');
+      div.className = "guess";
+      div.textContent = data.byName + " ha tentato: " + data.guess + " (Domanda #" + data.qCount + ")";
+      guessesDiv.appendChild(div);
+    });
+
+    socket.on('error:msg', msg => alert(msg));
+  </script>
+</body>
+</html>
